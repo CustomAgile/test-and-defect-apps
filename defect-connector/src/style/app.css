@@ -1,0 +1,16 @@
+.app {
+}
+.tsinfolink {
+    position:absolute;
+    right:0px;
+    width:5%;
+}
+
+.ts-action-remove {
+    background-image: url('/slm/images/sprites.gif');
+    background-position: 0px 358px;
+    
+    height: 20px;
+    width: 20px;
+    
+}

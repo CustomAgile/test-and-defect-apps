@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Configurable Grid with Dependencies</title>
+    <!--  (c) 2014 Rally Software Development Corp.  All Rights Reserved. -->
+    <!--  Build Date: Tue Jan 21 2014 09:14:24 GMT-0800 (PST) -->
+    
+    <script type="text/javascript">
+        var APP_BUILD_DATE = "Tue Jan 21 2014 09:14:24 GMT-0800 (PST)";
+        var CHECKSUM = 46317658379;
+    </script>
+    
+    <script type="text/javascript" src="/apps/2.0rc2/sdk.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function() {
+             
+Ext.override(Rally.ui.picker.FieldPicker,{
+
+    _buildStoreData: function(models) {
+        var me = this;
+        var data = {};
+        Ext.Object.each(models, function(modelName, model) {
+            var fields = _.filter(model.getFields(), this._shouldShowField, this);
+            var otherModels = _.difference(Ext.Object.getValues(models), [model]);
+
+            _.each(fields, function(field) {
+                var continue_flag = true;
+                if (typeof(this.ts_field_filter) == "function" ) {
+                    continue_flag = this.ts_field_filter(field);
+                }
+                if ( continue_flag ) {
+                    var fieldNameWithoutPrefix = field.name.replace(/^c_/, '');
+                    if (!data[fieldNameWithoutPrefix]) {
+                        data[fieldNameWithoutPrefix] = {
+                            name: field.name,
+                            displayName: this._getFieldDisplayName(field)
+                        };
+    
+                        var otherModelsWithField = _.filter(otherModels, function(otherModel) {
+                            return otherModel.hasField(fieldNameWithoutPrefix) && this._shouldShowField(otherModel.getField(fieldNameWithoutPrefix));
+                        }, this);
+    
+                        if (otherModelsWithField.length !== otherModels.length) {
+                            var modelsWithField = [model.displayName].concat(_.pluck(otherModelsWithField, 'displayName'));
+                            data[fieldNameWithoutPrefix].displayName += ' (' + modelsWithField.join(', ') + ')';
+                        }
+                    }
+                }
+            }, this);
+        }, this);
+        return data;
+    }
+});
+/**
+ * A link that pops up a version dialog box
+ */
+
+Ext.define('Rally.technicalservices.InfoLink',{
+    extend: 'Ext.Component',
+    alias: 'widget.tsinfolink',
+    
+    /**
+     * @cfg {String} informationHtml
+     * Additional text to be displayed on the popup dialog (for exmaple,
+     * to add a description of the app's use or functionality)
+     */
+    informationHtml: null,
+    
+    /**
+     * 
+     * cfg {String} title
+     * The title for the dialog box
+     */
+     title: "Information",
+    
+    renderTpl: "<div id='{id}-infolinkWrap' class='tsinfolink'></div>",
+
+    initComponent: function() {
+        this.callParent(arguments);
+       
+    },
+    
+    onRender: function() {
+        this.callParent(arguments);
+        this.mon(this.el,'click',this.onClick,this);
+    },
+    _generateChecksum: function(string){
+        var chk = 0x12345678,
+            i;
+        string = string.replace(/var CHECKSUM = .*;/,"");
+        
+        for (i = 0; i < string.length; i++) {
+            chk += (string.charCodeAt(i) * i);
+        }
+    
+        return chk;
+    },
+    _checkChecksum: function(container) {
+        var me = this;
+        Ext.Ajax.request({
+            url: document.URL,
+            params: {
+                id: 1
+            },
+            success: function (response) {
+                text = response.responseText;
+                if ( CHECKSUM ) {
+                    if ( CHECKSUM !== me._generateChecksum(text) ) {
+                        console.log("Checksums don't match!");
+                        if ( me.dialog ) {
+                            me.dialog.add({xtype:'container',html:'Checksums do not match'});
+                        }
+                    }
+                }
+            }
+        });
+    },
+    onClick: function(e) {
+        var me = this;
+        this._checkChecksum(this);
+        
+        var dialog_items = [];
+        
+        if ( this.informationHtml ) {
+            dialog_items.push({
+                xtype:'container',
+                html: this.informationHtml
+            });
+        }
+                
+        dialog_items.push({
+            xtype:'container',
+            html:"This app was created by the Rally Technical Services Team."
+        });
+        
+        if ( APP_BUILD_DATE ) {
+            dialog_items.push({
+                xtype:'container',
+                html:'Build date/time: ' + APP_BUILD_DATE
+            });
+        }
+        
+        if (this.dialog){this.dialog.destroy();}
+        this.dialog = Ext.create('Rally.ui.dialog.Dialog',{
+            defaults: { padding: 5, margin: 5 },
+            closable: true,
+            draggable: true,
+            title: me.title,
+            items: dialog_items
+        });
+        this.dialog.show();
+    }
+});
+
+/*
+ */
+Ext.define('Rally.technicalservices.Logger',{
+    constructor: function(config){
+        Ext.apply(this,config);
+    },
+    log: function(args){
+        var timestamp = "[ " + Ext.util.Format.date(new Date(), "Y-m-d H:i:s.u") + " ]";
+        //var output_args = arguments;
+        //output_args.unshift( [ "[ " + timestamp + " ]" ] );
+        //output_args = Ext.Array.push(output_args,arguments);
+        
+        var output_args = [];
+        output_args = Ext.Array.push(output_args,[timestamp]);
+        output_args = Ext.Array.push(output_args, Ext.Array.slice(arguments,0));
+
+        window.console && console.log.apply(console,output_args);
+    }
+
+});
+
+Ext.define('Rally.technicalservices.SettingsDialog',{
+    extend: 'Rally.ui.dialog.Dialog',
+    alias: 'widget.tssettingsdialog',
+    config: {
+        /* default settings. pass new ones in */
+        title: 'Settings',
+        type: 'Defect',
+        /**
+         * artifact_types
+         * [ @type ] artifact_types This is the list of items allowed in the model chooser drop down
+         */
+        artifact_types: [
+            {Name:'UserStory',Value:'hierarchicalrequirement'},
+            {Name:'Defect',Value:'Defect'},
+            {Name:'Release',Value:'Release'}
+        ],
+        /**
+         * A string to apply to choose records that are allowed in the calculations --
+         * this query is applied to items as they exist now, and then all the calculations are
+         * about only those records as they were during the time period.  
+         * 
+         * This can make everything slow, because it adds a WsapiCall on top of the LookBack calls
+         */
+         query_string: null,
+         /**
+          * A string array of names of fields that are multiselect enabled
+          * [@String] fields 
+          */
+         multi_field_list: [],
+         /**
+          * A string array of names of fields that were chosen for fetching (the
+          * columns already picked)
+          * 
+          * [@String] 
+          */
+         fetch_list: []
+    },
+    items: {
+        xtype: 'panel',
+        border: false,
+        defaults: {
+            padding: 5,
+            margin: 5
+        },
+        items: [
+            /*{
+                xtype: 'container',
+                itemId: 'model_selector_box'
+            },*/
+            {
+                xtype:'container',
+                itemId: 'column_selector_box'
+            },
+            /*{
+                xtype:'container',
+                itemId: 'multichoice_column_selector_box',
+                height: 100
+            },*/
+            {
+                xtype:'container',
+                itemId:'query_selector_box'
+            }
+        ]
+    },
+    constructor: function(config){
+        this.mergeConfig(config);
+        this.callParent([this.config]);
+    },
+    initComponent: function() {
+        this.callParent(arguments);
+        this.addEvents(
+            /**
+             * @event settingsChosen
+             * Fires when user clicks done after making settings choices
+             * @param {Rally.technicalservices.SettingsDialog} this
+             * @param {hash} config settings
+             */
+            'settingsChosen',
+            /**
+             * @event cancelChosen
+             * Fires when user clicks the cancel button
+             */
+            'cancelChosen'
+        );
+        this._buildButtons();
+        this._addChoosers();
+    },
+    _buildButtons: function() {
+        this.down('panel').addDocked({
+            xtype: 'toolbar',
+            dock: 'bottom',
+            padding: '0 0 10 0',
+            layout: {
+                type: 'hbox',
+                pack: 'center'
+            },
+            ui: 'footer',
+            items: [
+                {
+                    xtype: 'rallybutton',
+                    text: 'Save',
+                    scope: this,
+                    userAction: 'clicked done in dialog',
+                    handler: function() {
+                        this.fireEvent('settingsChosen', this, this._getConfig());
+                        this.close();
+                    }
+                },
+                {
+                    xtype: 'rallybutton',
+                    text: 'Cancel',
+                    handler: function() {
+                        this.fireEvent('cancelChosen');
+                        this.close()
+                    },
+                    scope: this
+                }
+            ]
+        });
+    },
+    _getConfig: function() {
+        var me = this;
+        var config = {};
+        if ( this.down('#model_chooser') ) {
+            config.type = this.down('#model_chooser').getValue();
+        }
+        var columns = [];
+        var fetch = [];
+        
+        me.multi_field_list = [];
+        
+        if ( this.down('#column_chooser') ) {
+            var fields = this.down('#column_chooser').getValue();
+            Ext.Array.each(fields,function(field){
+                if ( Ext.Array.contains(me.multi_field_list,field.get('name') ) ) {
+                    columns.push({
+                        dataIndex:field.get('name'),
+                        text: field.get('displayName'),
+                        editor: {
+                            xtype:'tsmultipicker',
+                            autoExpand: true,
+                            field_name:field.get('name')
+                        }
+                    });
+                } else {
+                    columns.push({
+                        dataIndex:field.get('name'),
+                        text: field.get('displayName')
+                    }); 
+                }
+                fetch.push(field.get('name'));
+            });
+        }
+        if ( this.down('#multichoice_column_chooser') ) {
+            var fields = this.down('#multichoice_column_chooser').getValue();
+            Ext.Array.each(fields,function(field){
+                columns.push({
+                    dataIndex:field.get('name'),
+                    text: field.get('displayName'),
+                    editor: {
+                        xtype:'tsmultipicker',
+                        field_name:field.get('name')
+                    }
+                });
+                fetch.push(field.get('name'));
+            });
+        }
+
+        config.columns = columns;
+        config.fetch = fetch.join(',');
+            
+        if ( this.down('#query_chooser') ) {
+            config.query_string = this.down('#query_chooser').getValue();
+        }
+        return config;
+    },
+    _addChoosers: function() {
+        var me = this;
+        this._addModelChooser();
+        this._addColumnChooser();
+        //this._addMultiChoiceColumnChooser();
+        this._addQueryChooser();
+        
+    },
+    _addModelChooser: function() {
+        this.type = 'Defect';
+        this._addColumnChooser();
+//        var me = this;
+//        var type_store = Ext.create('Rally.data.custom.Store',{
+//            data: me.artifact_types
+//        });
+//        
+//        this.down('#model_selector_box').add({
+//            xtype:'rallycombobox',
+//            itemId: 'model_chooser',
+//            displayField: 'Name',
+//            valueField: 'Value',
+//            store: type_store,
+//            fieldLabel: 'Artifact Type',
+//            labelWidth: 75,
+//            value: me.type,
+//            listeners: {
+//                scope: this,
+//                change: function(cb,new_value){
+//                    this.type = new_value;
+//                    this._addColumnChooser();
+//                    //this._addMultiChoiceColumnChooser();
+//                }
+//            }
+//        });
+    },
+    _addColumnChooser: function() {
+        var me = this;
+        this.down('#column_selector_box').removeAll();
+        var cb = this.down('#column_selector_box').add({
+            alwaysExpanded: true,
+            xtype: 'rallyfieldpicker',
+            autoExpand: true,
+            multi_field_list: [],
+            modelTypes: [me.type],
+            itemId: 'column_chooser',
+            labelWidth: 75,
+            fieldLabel: 'Columns',
+            ts_field_filter: this._filterOutTextFields,
+            value:this.fetch_list
+        });
+    },
+    _addMultiChoiceColumnChooser: function() {
+        var me = this;
+        
+        this.down('#multichoice_column_selector_box').removeAll();
+        var cb = this.down('#multichoice_column_selector_box').add({
+            xtype: 'rallyfieldpicker',
+            autoExpand: true,
+            modelTypes: [me.type],
+            itemId: 'multichoice_column_chooser',
+            labelWidth: 75,
+            fieldLabel: 'Multi-select Columns',
+            ts_field_filter: this._filterInPossibleMultiFields
+        });
+    },
+    _addQueryChooser: function() {
+        var me = this;
+        this.down('#query_selector_box').add({
+            xtype:'textareafield',
+            grow: true,
+            width: 300,
+            itemId:'query_chooser',
+            labelAlign: 'top',
+            fieldLabel:'Limit to items that currently meet this query filter',
+            value: me.query_string
+        });
+    },
+    _dateValidator: function(value) {
+        return true;
+    },
+    _filterOutTextFields: function(field){
+        var attribute_defn = field.attributeDefinition;
+        if ( ! attribute_defn ) {
+            return false;
+        }
+        if ( attribute_defn.ElementName == "RevisionHistory" ) {
+            return false;
+        }
+        if ( attribute_defn ) {
+            var attribute_type = attribute_defn.AttributeType;
+            if ( attribute_type == "TEXT" ) {
+                return Ext.Array.contains(this.multi_field_list,field.name);
+                return false;
+            }
+        } else {
+            return false;
+        }
+        return true;
+    },
+    _filterInPossibleMultiFields: function(field){
+        var attribute_defn = field.attributeDefinition;
+        if ( field.name == "Description" || field.name == "Notes" ) {
+            return false;
+        }
+        if ( attribute_defn ) {
+            var attribute_type = attribute_defn.AttributeType;
+            if ( attribute_type == "TEXT" ) {
+                return true;
+            }
+        } else {
+            return false;
+        }
+        return false;
+    }
+    
+});
+Ext.define('TSStringFilter',{
+    extend: 'Rally.data.QueryFilter',
+    config: {
+        query_string: ''
+    },
+    constructor: function(config) {
+        this.mergeConfig(config);
+        this.callParent([this.config]);
+    },
+    _createQueryString: function(property, operator, value) {
+        return this.query_string;
+    }
+});
+Ext.define('CustomApp', {
+    extend: 'Rally.app.App',
+
+    requires: [
+        'Rally.data.util.Sorter',
+        'Rally.data.wsapi.Filter',
+        'Rally.ui.grid.Grid',
+        'Rally.data.ModelFactory',
+        'Rally.ui.grid.plugin.PercentDonePopoverPlugin'
+    ],
+    
+    link_field: 'c_LinkedDefects',
+
+    items: [
+        { xtype:'container',itemId:'settings_box',margin: 10 },
+        { xtype:'container', itemId:'grid_box',margin: 10 }
+    ],
+    config: {
+        defaultSettings: {
+            type: 'Defect',
+            fetch: "FormattedID,Name,c_LinkedDefects",
+            pageSize: 20
+        }
+    },
+    logger: new Rally.technicalservices.Logger(),
+
+    launch: function() {
+        var me = this;
+        
+        Rally.data.PreferenceManager.load({
+            appID: this.getAppId(),
+            filterByUser: true,
+            success: function(prefs) {
+                me.logger.log("got prefs ", prefs);
+                var key = "rally.technicalservices.defectconnect.settings";
+                if ( prefs && prefs[key] ) {
+                    me.config = Ext.JSON.decode(prefs[key]);
+                }
+                me.logger.log("config is now ", me.config);
+                                
+                me.down('#settings_box').add({
+                    xtype: 'rallybutton',
+                    text: 'Settings',
+                    handler: function() {
+                        me._showSettingsDialog();
+                    },
+                    scope: me
+                });    
+                me._makeAndDisplayGrid();
+            }
+        });  
+    },
+    _makeAndDisplayGrid: function() {
+        var me = this;
+        this.logger.log("_makeAndDisplayGrid",this.config);
+        var context = this.getContext(),
+            pageSize = this.getSetting('pageSize'),
+            fetch = this.getSetting('fetch'),
+            columns = this._getColumns(fetch);
+
+        var fetch_array = fetch.split(',');
+        if ( Ext.Array.indexOf(fetch_array,me.link_field) == -1 ) {
+            fetch_array.push(me.link_field);
+            fetch = fetch_array.join(',');
+        }
+        
+        if ( this.down('rallygrid') ) {
+            this.down('rallygrid').destroy();
+        }
+        
+        this.logger.log("make grid with ", fetch, columns);
+        
+        var grid = this.down('#grid_box').add({
+            xtype: 'rallygrid',
+            columnCfgs: columns,
+            enableColumnHide: false,
+            enableRanking: false,
+            enableBulkEdit: true,
+            autoScroll: true,
+            storeConfig: {
+                fetch: fetch,
+                models: this.getSetting('type'),
+                filters: this._getFilters(),
+                pageSize: pageSize,
+                autoLoad: true,
+                sorters: Rally.data.util.Sorter.sorters(this.getSetting('order')),
+                listeners: {
+                    load: this._loaded,
+                    scope: this
+                }
+            },
+            pagingToolbarCfg: {
+                stateful: true,
+                stateId: 'rally-techservices-defectconnect-toolbar',
+                stateEvents: ['change'],
+                pageSizes: [pageSize, 50, 100, 200, 1000],
+                listeners: {
+                    change: function(toolbar,pageData) {
+                        me.logger.log('change',pageData);
+                    },
+                    statesave: function(toolbar,state){
+                        me.logger.log('statesave',state);
+                    },
+                    staterestore: function(toolbar,state){
+                        me.logger.log('staterestore',state);
+                        var store = this.getStore();
+                        if ( store ) {
+                            if ( state && state.currentPage ) {
+                                store.currentPage = state.currentPage;
+                            }
+                            if ( state && state.pageSize ) {
+                                store.pageSize = state.pageSize;
+                            }
+                        }
+                    }
+                },
+                getState: function() {
+                    return this._getPageData();
+                }
+            },
+            listeners: {
+                scope: this,
+                beforeedit: function (editor,e) {
+                    if ( e.field === this.link_field ) {
+                        return false;
+                    }
+                    return true;
+                }
+            }
+        });
+
+    },
+    
+    _loaded: function() { },
+
+    _getFilters: function() {
+        var filters = [],
+            query_string = this.getSetting('query_string');
+        filters = Ext.create('TSStringFilter',{query_string:query_string});
+        return filters;
+    },
+
+    _isSchedulableType: function(type) {
+        return _.contains(['hierarchicalrequirement', 'task', 'defect', 'defectsuite', 'testset'], type.toLowerCase());
+    },
+    _getColumns: function(fetch){
+        var me = this;
+        this.logger.log("_getColumns",fetch,this.getSetting('columns'));
+        var link_renderer = function(value,cellData,record,rowIndex,colIndex,store,view) {
+            return me._renderLinks(value,cellData,record,rowIndex,colIndex,store,view,me);
+        }
+        
+        if ( this.getSetting('columns') ) {
+            var columns = this.getSetting('columns');
+            this.logger.log("Using column definitions",columns);
+            if ( ! this._includesField(columns,this.link_field) ) {
+                columns.push({
+                    dataIndex: this.link_field,
+                    text: 'Links',
+                    renderer: link_renderer
+                });
+            }
+            return columns;
+        }
+        if (fetch) {
+            var fields = Ext.Array.remove(fetch.split(','),me.link_field);
+            var columns = fields;
+            columns.push({
+                dataIndex: this.link_field,
+                text: 'Links',
+                renderer: link_renderer
+            });
+            
+            this.logger.log("setting columns to ", columns);
+            return columns;
+        }
+        return [];
+    },
+    _includesField:function(columns,field_name) {
+        var includes = false;
+        Ext.Array.each(columns,function(column){
+            if ( column.dataIndex == field_name ) {
+                includes = true;
+            }
+        });
+        return includes;
+    },
+    _showSettingsDialog: function() {
+        if ( this.dialog ) { this.dialog.destroy(); }
+        var config = this.config;
+        
+        this.dialog = Ext.create('Rally.technicalservices.SettingsDialog',{
+            type: this.getSetting('type'),
+            query_string: this.getSetting('query_string'),
+            multi_field_list: this.multi_field_list,
+            fetch_list: this.getSetting('fetch'),
+            listeners: {
+                settingsChosen: function(dialog,returned_config) {
+                    var me = this;
+                    this.config = Ext.Object.merge(config,returned_config);
+                    this._saveConfig(this.config);
+                    this._makeAndDisplayGrid();
+                },
+                scope: this
+            }
+        });
+        this.dialog.show();
+    },
+    _saveConfig: function(config) {
+        var me = this;
+        this.logger.log("new config",config);
+        delete config["config"];
+        delete config["context"];
+        delete config["settings"];
+        
+        Rally.data.PreferenceManager.update({
+            appID: this.getAppId(),
+            filterByUser: true,
+            settings: { 
+                'rally.technicalservices.defectconnect.settings': Ext.JSON.encode(config)
+            },
+            success: function() {
+                me.logger.log("Saved settings",config);
+            }
+        });
+    },
+    // override until we figure out problem with getSettingsFields
+    getSetting: function(field){
+        config = this.config;
+        if ( config[field] ) {
+            return config[field];
+        }
+        if ( config.defaultSettings[field] ) {
+            return config.defaultSettings[field];
+        }
+        return null;
+    },
+    _renderLinks: function(value,cellData,record,rowIndex,colIndex,store,view,scope) {
+        var me = scope;
+        
+        me.logger.log("_renderLinks",value,record);
+        
+        var connector = Ext.create('Rally.technicalservices.ui.ConnectionContainer',{
+            record:record,
+            connector_field: me.link_field
+        });
+        
+        var oids = connector.getConnectedObjectIDs(record);
+        var oid  = record.get('ObjectID');
+        
+        var display_text = "";
+        
+        if ( oids.length > 0 ) { 
+            // make space for the items to go after we grab them
+            display_text = "<span id='links_" + oid + "'>";
+            for(var i=0;i<oids.length;i++) {
+                display_text += "<span id='" + oid + "_" + oids[i] + "'></span><br/>";
+            }
+            display_text += "</span>";
+            
+            Rally.data.ModelFactory.getModel({
+                type: 'Defect',
+                success: function(model) {
+                    me.logger.log( "successful getting of that there model" );
+                    Ext.Array.each( oids, function(linked_oid){
+                        me.logger.log( oids, linked_oid );
+                        me.logger.log("linked: ", linked_oid);
+                        model.load(linked_oid, {
+                            fetch: ['FormattedID', 'State'],
+                            callback: function(result, operation) {
+                                if(operation.wasSuccessful()) {
+                                    var fid = result.get('FormattedID');
+                                    var state = result.get('State');
+                                    var spanner_id = oid + "_" + linked_oid;
+                                    var spanner = Ext.dom.Query.select('#' + spanner_id);
+                                    if ( spanner ) {
+                                        var existing_text = spanner[0].innerHTML;
+                                        var inside_text = "";
+                                        if ( existing_text ) {
+                                            inside_text = existing_text + "<br/>";
+                                        }
+                                        inside_text += fid + ": " + state;
+                                        spanner[0].innerHTML = inside_text;
+                                    } 
+                                }
+                            }
+                        });  
+                    });
+                }
+            });
+        }
+        return display_text;
+    }
+});
+Ext.define('Rally.technicalservices.ui.ConnectionContainer',{
+    requires: [
+        'Rally.ui.Button',
+        'Rally.technicalservices.Logger'
+    ],
+    extend: 'Ext.Container',
+    alias: 'widget.tsconnectioncontainer',
+    config: {
+        /**
+         * 
+         * @cfg {Rally.data.model} (required)
+         * The source record that has a connection with other records
+         */
+        record: null,
+        /**
+         * 
+         * @cfg {String} (required)
+         * The name of the text field that holds the connection information
+         */
+        connector_field: 'Notes',
+        /**
+         * @cfg {Rally.technicalservices.Logger} 
+         * A convenient way to print to the console
+         */
+        logger: new Rally.technicalservices.Logger()
+    },
+    constructor: function(config){
+        this.mergeConfig(config);
+        this.callParent([this.config]);
+    },
+    defaults: { padding: 5 },
+    items: [
+        { xtype:'container',itemId:'cc_header', html: '<h2>Connections</h2>' },
+        { xtype:'container',itemId:'cc_button' },
+        { xtype:'container',itemId:'cc_details' }
+    ],
+    initComponent: function() {
+        this.callParent(arguments);
+        this.down('#cc_button').add({
+            xtype:'rallybutton',
+            text:'+',
+            handler: function() {
+                this._showTargetSelector();
+            },
+            scope: this
+        });
+        this._showConnections();
+    },
+    _showConnections: function() {
+        this.logger.log("_showConnections");
+        if ( this.down('#detail_grid') ) { this.down('#detail_grid').destroy(); }
+        
+        Ext.create('Rally.data.wsapi.Store',{
+            model:'Defect',
+            context: { project:null },
+            autoLoad: true,
+            filters: this._getFilterForCurrentItems(this.record),
+            fetch:['FormattedID','Name','Severity',this.connector_field],
+            listeners: {
+                scope: this,
+                load: function(store,records){
+                    if ( this.down('#detail_grid') ) { this.down('#detail_grid').destroy(); }
+                    this.down('#cc_details').add({
+                        xtype:'rallygrid',
+                        store: store,
+                        itemId: 'detail_grid',
+                        showPagingToolbar: false,
+                        enableEditing: false,
+                        enableRanking: false,
+                        enableColumnMove: false,
+                        showRowActionsColumn: false,
+                        columnCfgs: [
+                            { text:'id', dataIndex:'FormattedID' },
+                            { text:'Name', dataIndex:'Name', flex: 1 },
+                            { text:'Severity', dataIndex:'Severity' },
+                            { text:'Remove', xtype:'templatecolumn', tpl:'<div class="ts-action-remove"> </div>' }
+                        ],
+                        listeners: {
+                            scope: this,
+                            cellclick: function(grid,cell,index,item) {
+                                if ( index == 3 ) {
+                                    this._disconnectFrom(item);
+                                }
+                            }
+                        }
+                    });  
+                }
+            }
+        });
+    },
+    _showTargetSelector: function() {
+        if ( this.dialog ) { this.dialog.destroy(); }
+        
+        this.dialog = Ext.create('Rally.ui.dialog.ChooserDialog',{
+            artifactTypes:['defect'],
+            autoShow: true,
+            title: 'Choose Defect',
+            storeConfig: {
+                context: { project: null },
+                filters: [
+                    { property:'FormattedID', operator:'!=', value: this.record.get('FormattedID')},
+                    {property:"State",operator:"!=",value:"Fixed"},
+                    {property:"State",operator:"!=",value:"Closed"}
+                ],
+                fetch: ['FormattedID','Name',this.connector_field,'Severity']
+            },
+            multiple: true,
+            listeners: {
+                scope: this,
+                artifactChosen: function(items) {
+                    var me = this;
+                    var new_html = me.getConnectionHtml(items);
+                    this.down('#cc_details').removeAll();
+                    this._updateRecord(this.record,new_html,true);
+                    this._updateOtherRecords(items);
+                }
+            }
+        });
+    },
+    _updateRecord: function(record,new_html,refresh) {
+        var me = this;
+        record.set(this.connector_field,new_html);
+        record.save({
+            callback: function(result,operation){
+                if (!operation.wasSuccessful()) {
+                    alert("Problem. " + operation.getError());
+                } else {
+                    if ( refresh ) {
+                        me. _showConnections();
+                    }
+                }
+            }
+        });
+    },
+    _updateOtherRecords: function(items) {
+        var me = this;
+        Ext.Array.each(items, function(item){
+            var object_id = me.record.get('ObjectID');
+            var previously_selected_oids = me.getConnectedObjectIDs(item);
+            if ( Ext.Array.indexOf(previously_selected_oids, object_id) === -1 ) {
+                var html = [];
+                if ( Ext.String.trim(item.get(me.connector_field)) != "" ) {
+                    html.push(item.get(me.connector_field));
+                }
+                html.push( me._getConnectionHtmlForOne(me.record) );
+                me._updateRecord(item,html.join('\r\n'),false);
+            }
+        });
+    },
+    _getConnectionHtmlForOne: function(defect){
+        var object_id = defect.get('ObjectID');
+        var url = "/#/detail/defect/" + object_id;
+        var innerText = defect.get('FormattedID') + " " + defect.get('Name');
+        var severity = defect.get('Severity');
+        if (Ext.String.trim(severity) != "") {
+            innerText += " (" + severity + ")";
+        }
+        return "<div><a target='_blank' href='" + url + "'>" + innerText + "</a></div>";
+    },
+    getConnectionHtml: function(defects) {
+        var me = this;
+        var html = [];
+        var previously_selected_oids = this.getConnectedObjectIDs(this.record);
+        if ( Ext.String.trim(this.record.get(this.connector_field)) != "" ) {
+            html.push(this.record.get(this.connector_field));
+        }
+        Ext.Array.each(defects,function(defect){
+            var object_id = defect.get('ObjectID');
+            if ( Ext.Array.indexOf(previously_selected_oids, object_id) === -1 ) {
+                html.push(me._getConnectionHtmlForOne(defect));
+            }
+        });
+        return html.join('\r\n');
+    },
+    _getFilterForCurrentItems: function(defect){
+        this.logger.log("_getFilterForCurrentItems");
+        var oids = this.getConnectedObjectIDs(defect);
+        var filters;
+        
+        if ( oids.length === 0 ) {
+            filters = Ext.create('Rally.data.wsapi.Filter',{
+                property:'ObjectID',
+                value: -1
+            });
+        } else {
+            filters = Ext.create('Rally.data.wsapi.Filter',{
+                property:'ObjectID',
+                operator:'=',
+                value:oids[0]
+            });
+            
+            for ( var i=1;i<oids.length;i++ ) {
+                filters = filters.or(Ext.create('Rally.data.wsapi.Filter',{
+                    property:'ObjectID',
+                    operator:'=',
+                    value:oids[i]
+                }));
+            }
+        }
+        this.logger.log(filters.toString());
+        return filters;
+    },
+    getConnectedObjectIDs: function(defect) {
+        var me = this;
+        var oids = [];
+        var connected_html = document.createElement('div');
+        connected_html.innerHTML = "<div>" + defect.get(this.connector_field) + "</div>";
+        
+        var anchors = Ext.dom.Query.select('a',connected_html);
+        Ext.Array.each(anchors, function(anchor){
+            var href = anchor.href.replace(/.*\//,"");
+            var href_int = parseInt(href,10);
+            if ( href_int > 0 ) {
+                oids.push(href_int);
+            }
+        });
+        me.logger.log(anchors); 
+        return oids;
+    },
+    getHtmlAfterRemove:function(defect,remove_oid) {
+        var connected_html = document.createElement('div');
+        connected_html.innerHTML = defect.get(this.connector_field);
+        var anchors = Ext.dom.Query.select('a',connected_html);
+        Ext.Array.each(anchors, function(anchor){
+            var href = anchor.href.replace(/.*\//,"");
+            var href_int = parseInt(href,10);
+            if ( href_int == remove_oid ) {
+                // the anchor is wrapped by a div; we want to remove the whole thing
+                anchor.parentNode.parentNode.removeChild(anchor.parentNode);
+            }
+        });
+        return connected_html.innerHTML;
+    },
+    onDestroy: function() {
+        this.callParent(arguments);
+        if ( this.dialog ){this.dialog.destroy();}
+    },
+    _disconnectFrom: function(other_defect) {
+        this.logger.log("_disconnectFrom",other_defect);
+        var html_of_target_links = this.getHtmlAfterRemove(this.record,other_defect.get('ObjectID'));
+        var html_of_links_on_target = this.getHtmlAfterRemove(other_defect,this.record.get('ObjectID'));
+        
+        this._updateRecord(this.record,html_of_target_links,true);
+        this._updateRecord(other_defect,html_of_links_on_target,false)
+    }
+    
+});
+            
+               Rally.launchApp('CustomApp', {
+                   name: 'Configurable Grid with Dependencies'
+               });
+        });
+    </script>
+    
+    <style type="text/css">
+
+.app {
+}
+.tsinfolink {
+    position:absolute;
+    right:0px;
+    width:5%;
+}
+    </style>
+
+</head>
+<body></body>
+</html>

@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Runner</title>
+    <!--  (c) 2014 Rally Software Development Corp.  All Rights Reserved. -->
+    <!--  Build Date: Tue Jun 24 2014 11:36:19 GMT-0700 (PDT) -->
+    
+    <script type="text/javascript">
+        var APP_BUILD_DATE = "Tue Jun 24 2014 11:36:19 GMT-0700 (PDT)";
+        var CHECKSUM = 55896226453;
+    </script>
+    
+    <script type="text/javascript" src="/apps/2.0rc2/sdk.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function() {
+             
+/**
+ * A link that pops up a version dialog box
+ */
+
+Ext.define('Rally.technicalservices.InfoLink',{
+    extend: 'Ext.Component',
+    alias: 'widget.tsinfolink',
+    
+    /**
+     * @cfg {String} informationHtml
+     * Additional text to be displayed on the popup dialog (for exmaple,
+     * to add a description of the app's use or functionality)
+     */
+    informationHtml: null,
+    
+    /**
+     * 
+     * cfg {String} title
+     * The title for the dialog box
+     */
+     text: "Information",
+    
+    renderTpl: "<div id='{id}-infolinkWrap' class='tsinfolink'></div>",
+
+    initComponent: function() {
+        this.callParent(arguments);
+       
+    },
+    
+    onRender: function() {
+        this.callParent(arguments);
+        this.mon(this.el,'click',this.onClick,this);
+    },
+    _generateChecksum: function(string){
+        var chk = 0x12345678,
+            i;
+        string = string.replace(/var CHECKSUM = .*;/,"");
+        
+        for (i = 0; i < string.length; i++) {
+            chk += (string.charCodeAt(i) * i);
+        }
+    
+        return chk;
+    },
+    _checkChecksum: function(container) {
+        var me = this;
+        Ext.Ajax.request({
+            url: document.URL,
+            params: {
+                id: 1
+            },
+            success: function (response) {
+                text = response.responseText;
+                if ( CHECKSUM ) {
+                    if ( CHECKSUM !== me._generateChecksum(text) ) {
+                        console.log("Checksums don't match!");
+                        if ( me.dialog ) {
+                            me.dialog.add({xtype:'container',html:'Checksums do not match'});
+                        }
+                    }
+                }
+            }
+        });
+    },
+    onClick: function(e) {
+        var me = this;
+        this._checkChecksum(this);
+        
+        var dialog_items = [];
+        
+        if ( this.informationHtml ) {
+            dialog_items.push({
+                xtype:'container',
+                html: this.informationHtml
+            });
+        }
+                
+        dialog_items.push({
+            xtype:'container',
+            html:"This app was created by the Rally Technical Services Team."
+        });
+        
+        if ( APP_BUILD_DATE ) {
+            dialog_items.push({
+                xtype:'container',
+                html:'Build date/time: ' + APP_BUILD_DATE
+            });
+        }
+        
+        if (this.dialog){this.dialog.destroy();}
+        this.dialog = Ext.create('Rally.ui.dialog.Dialog',{
+            defaults: { padding: 5, margin: 5 },
+            closable: true,
+            draggable: true,
+            title: me.title,
+            items: dialog_items
+        });
+        this.dialog.show();
+    }
+});
+/*
+ */
+Ext.define('Rally.technicalservices.Logger',{
+    constructor: function(config){
+        Ext.apply(this,config);
+    },
+    log: function(args){
+        var timestamp = "[ " + Ext.util.Format.date(new Date(), "Y-m-d H:i:s.u") + " ]";
+        //var output_args = arguments;
+        //output_args.unshift( [ "[ " + timestamp + " ]" ] );
+        //output_args = Ext.Array.push(output_args,arguments);
+        
+        var output_args = [];
+        output_args = Ext.Array.push(output_args,[timestamp]);
+        output_args = Ext.Array.push(output_args, Ext.Array.slice(arguments,0));
+
+        window.console && console.log.apply(console,output_args);
+    }
+
+});
+
+/**
+ * a component that displays and allows interaction with test steps for a test case
+ */
+
+Ext.define('Rally.technicalservices.TestStepTable',{
+    extend: 'Ext.Container',
+    alias: 'widget.tsteststeptable',
+    logger: new Rally.technicalservices.Logger(),
+    config: {
+        /**
+         * 
+         * The test case record (the kind from a wsapi datastore, reponds to a "get")
+         * {@TestCase} test_case  
+         */
+        test_case: null,
+        test_steps: [],
+        current_index: -1,
+        /**
+         * 
+         * [ @String ] step_vericts  An array of valid verdicts for each step 
+         */
+        step_verdict_store: null,
+        tester: null
+    },
+    items: [
+        {xtype:'container',itemId:'summary_box'},
+        {xtype:'container',itemId:'grid_box', padding: 10, margin: 10},
+        {xtype:'container',itemId:'action_box', defaults: { padding: 5, margin: 5 }, layout: { type: 'hbox', pack: 'center' }}
+    ],
+    constructor: function(config){
+        this.mergeConfig(config);
+        this.callParent([this.config]);
+        
+    },
+    initComponent: function() {
+        this.logger.log("  TestStepTable.initComponent");
+        this.callParent(arguments);
+        this.addEvents(
+            /**
+             * @event verdictChosen
+             * Fires when user clicks one of the verdict buttons
+             * @param {Rally.technicalservices.TestStepTable} this
+             * @param {model} test_case 
+             * @param {String} verdict
+             * @param [{Record}] steps 
+             */
+            'verdictChosen',
+            /**
+             * @event stepUpdated
+             * Fires when user modifies one of the steps (e.g., to set a verdict to the step)
+             * @param {Rally.technicalservices.TestStepTable} this
+             * @param {Rally.data.custom.Store} step_store  The data store holding the steps in the table
+             * @param {Record} step The step that changed
+             * @param [{String}] modified_field_names  The fields that changed on the record 
+             */
+            'stepUpdated'
+        );
+        this._setSummary(this.test_case);
+        this._addButtons();
+        //this._makeGrid();
+        this._makeOldTable();
+    },
+    refreshDisplay: function(test_case) {
+        this._setSummary(test_case);
+    },
+    _addButtons: function() {
+        var me = this;
+        this.down('#action_box').add({
+            xtype:'rallycombobox',
+            itemId:'verdict_combo',
+            displayField:'text',
+            valueField:'dataIndex',
+            store: me.step_verdict_store,
+            value: 'None',
+            fieldLabel: 'Verdict',
+            labelWidth: 45
+        });
+        this.down('#action_box').add({
+            xtype: 'rallybutton',
+            itemId: 'set_step_button',
+            disabled: true,
+            text: 'Set All Steps to Verdict',
+            disabled: true,
+            scope: this,
+            handler: function() {
+                this.setAllSteps(me.down('#verdict_combo').getValue());
+            } 
+        });
+        this.down('#action_box').add({
+            xtype: 'rallybutton',
+            itemId: 'save_verdict_button',
+            text: 'Set Test Case to Verdict',
+            disabled: true,
+            scope: this,
+            handler: function() {
+                //this._disableAllButtons();
+                var value = me.down('#verdict_combo').getValue();
+                if ( value === "None" ) {
+                    alert("Choose a verdict other than 'None'");
+                } else {
+                    this.fireEvent('verdictChosen',this,this.test_case,value,this._getAllSteps());
+                }
+            } 
+        });
+    },
+    _setSummary: function(test_case) {
+        var verdict = test_case.get('LastVerdict') || "None";
+       
+        var verdict_date = test_case.get('LastRun');
+        if ( verdict_date ) {
+            verdict = verdict + "/" + verdict_date;
+        }
+        this.down('#summary_box').removeAll();
+        this.down('#summary_box').add({
+            xtype:'container',
+            cls: 'title',
+            html: Rally.nav.DetailLink.getLink({
+                record: test_case.getData(),
+                subPage: 'testcaseresults',
+                text: test_case.get('FormattedID') }) + ": " + test_case.get('Name') + " (" + verdict + ")"
+        });
+    },
+    _makeGrid: function() {
+        this.logger.log("  TestStepTable._makeGrid ");
+        this.down('#grid_box').removeAll();
+        var me = this;
+        
+        if ( this.test_case ) {
+            this.down('#save_verdict_button').setDisabled(false);
+            var steps = this.test_case.get("_steps");
+            if ( steps.length === 0 ) {
+                this.down('#grid_box').add({
+                    xtype:'container',
+                    html:'No steps found for ' + this.test_case.get('FormattedID') + ' ' + this.test_case.get('Name')
+                });
+            } else {
+                this.logger.log("    Found steps: ", steps.length);
+                Ext.Array.each(steps,function(step){
+                    step.set('Verdict','None'),
+                    step.set('ActualResult','')
+                });
+                          
+                this.step_store = Ext.create('Rally.data.custom.Store',{
+                    data: steps,
+                    listeners: {
+                        scope: this,
+                        load: function(store,records) {
+                            store.on(
+                                'update',
+                                function(store,record,operation,modified_field_names){
+                                    this.fireEvent('stepUpdated',this,store,record,operation,modified_field_names);
+                                    this._enableAllButtons();
+                                },
+                                this
+                            );
+                        }
+                    }
+                });
+                
+                var addOneRenderer = function(value) {
+                    if (Ext.isNumber(value)) {
+                        return value + 1;
+                    }
+                    return value;
+                };
+                this.down('#grid_box').add({
+                    xtype:'rallygrid',
+                    store: this.step_store,
+                    sortableColumns: false,
+                    showRowActionsColumn: false,
+                    showPagingToolbar: false,
+                    columnCfgs: [
+                        { dataIndex:'StepIndex', text:'Step', renderer: addOneRenderer },
+                        { dataIndex:'Input', text:'Input', flex: 1},
+                        { dataIndex:'ExpectedResult',text:'Expected Result', flex: 1},
+                        { dataIndex:'ActualResult',text:'Actual Result', editor: 'rallytextfield', flex: 1},
+                        { dataIndex:'Verdict',text:'Step Verdict', editor: {
+                            xtype:'rallycombobox',
+                            store:me.step_verdict_store,
+                            displayField:'text',
+                            valueField:'dataIndex'
+                        }}
+                    ]
+                });
+                this.down('#set_step_button').setDisabled(false);
+            }       
+        }
+
+    },
+    _makeOldTable: function() {
+        this.logger.log("  TestStepTable._makeOldTable ");
+        this.down('#grid_box').removeAll();
+        var me = this;
+        
+        if ( this.test_case ) {
+            this.down('#save_verdict_button').setDisabled(false);
+            var steps = this.test_case.get("_steps");
+            if ( steps.length === 0 ) {
+                this.down('#grid_box').add({
+                    xtype:'container',
+                    html:'No steps found for ' + this.test_case.get('FormattedID') + ' ' + this.test_case.get('Name')
+                });
+            } else {
+                this.logger.log("    Found steps: ", steps.length);
+                Ext.Array.each(steps,function(step){
+                    step.set('Verdict','None'),
+                    step.set('ActualResult','')                    
+                });
+                        
+                var addOneRenderer = function(value) {
+                    if (Ext.isNumber(value)) {
+                        return value + 1;
+                    }
+                    return value;
+                };
+                
+                this.step_store = Ext.create('Rally.data.custom.Store',{
+                    data: steps,
+                    autoLoad: true
+                });
+                
+                var text_box = "<input class='actual_" + this.test_case.get('FormattedID') + "' type='text' size=50/>";
+
+                var verdict_box = this._getVerdictBox(this.test_case.get('FormattedID'));
+                
+                var columns = [
+                    { dataIndex:'StepIndex', text:'Step', renderer: addOneRenderer },
+                    { dataIndex:'Input', text:'Input' },
+                    { dataIndex:'ExpectedResult',text:'Expected Result'},
+                    { dataIndex:'ActualResult',text:'Actual Result', editor: text_box},
+                    { dataIndex:'Verdict',text:'Step Verdict', editor: verdict_box }
+                ];
+                
+                var html = "<table>";
+                html += "<tr class='ts-grid-header'>";
+                Ext.Array.each(columns,function(column){
+                    html += "<th class='ts-grid-header'>" + column.text + "</th>";
+                });
+                html += "</tr>";
+                
+                Ext.Array.each(steps,function(step){
+                    html += "<tr class='ts-grid-row'>";
+                    Ext.Array.each(columns,function(column){
+                        var display_value = step.get(column.dataIndex);
+                        if ( typeof(column.renderer) === 'function' ) {
+                            display_value = column.renderer(display_value,step);
+                        }
+                        if ( typeof(column.editor) === 'string' ) {
+                            display_value = column.editor;
+                        }
+                        html += "<td class='ts-grid-cell'>" + display_value + "</td>";
+                    });
+                    html += "</tr>";
+                });
+                html += "</table>";
+//              
+                this.down('#grid_box').update(html);
+                this.down('#set_step_button').setDisabled(false);
+            }       
+        }
+
+    },
+    _getVerdictBox: function(id) {
+        var html = "<SELECT class='verdict_" + id +  "'>";
+        this.step_verdict_store.each(function(verdict){
+            html += "<OPTION value='" + verdict.get('dataIndex') + "'>" + verdict.get('text') + "</OPTION>";
+        });
+        html += "</SELECT>";
+        return html;
+    },
+    _disableAllButtons: function() {
+        var buttons = this.query('rallybutton');
+        Ext.Array.each(buttons, function(button) { button.setDisabled(true);});
+    },
+    _enableAllButtons: function() {
+        var buttons = this.query('rallybutton');
+        Ext.Array.each(buttons, function(button) { button.setDisabled(false);});
+    },
+    _setVerdictListeners: function(){
+        var me = this;
+        var select_class = "verdict_" + this.test_case.get('FormattedID');
+        var comboboxes = Ext.query('.' + select_class,this.down('#grid_box').getEl().getHTML());
+        Ext.Array.each(comboboxes, function(combobox,idx){
+            Ext.get(combobox).addListener('change',function(evt,el,o){ 
+                me.step_store.getAt(idx).set('Verdict',el.value);
+                me.fireEvent('stepUpdated',me,me.step_store,me.step_store.getAt(idx),"Verdict");
+            });
+        });
+    },
+    _setActualListeners: function(){
+        var me = this;
+        var select_class = "actual_" + this.test_case.get('FormattedID');
+        var textboxes = Ext.query('.' + select_class,this.down('#grid_box').getEl().getHTML());
+        Ext.Array.each(textboxes, function(textbox,idx){
+            Ext.get(textbox).addListener('blur',function(evt,el,o){ 
+                me.step_store.getAt(idx).set('ActualResult',el.value);
+                me.fireEvent('stepUpdated',me,me.step_store,me.step_store.getAt(idx),"ActualResult");
+            });
+        });
+    },
+    setAllSteps: function(verdict){
+        var me = this;
+        var select_class = "verdict_" + this.test_case.get('FormattedID');
+        var comboboxes = Ext.query('.' + select_class,this.down('#grid_box').getEl().getHTML());
+        Ext.Array.each(comboboxes, function(combobox,idx){
+            Ext.getDom(combobox).value = verdict;
+            me.step_store.getAt(idx).set('Verdict',verdict);
+            me.fireEvent('stepUpdated',me,me.step_store,me.step_store.getAt(idx),"Verdict");
+        });
+    },
+    _getAllSteps: function() {
+        var steps = [];
+        var store = this.step_store;
+        if ( store ) {
+            var step_count = store.getCount();
+            for ( var i=0;i<step_count;i++ ) {
+                var step = store.getAt(i);
+                steps.push(step);
+            }
+        }
+        return steps;
+    },
+    _clearActualResults: function() {
+        var me = this;
+        var select_class = "actual_" + this.test_case.get('FormattedID');
+        var textboxes = Ext.query('.' + select_class,this.down('#grid_box').getEl().getHTML());
+        Ext.Array.each(textboxes, function(textbox,idx){
+            me.step_store.getAt(idx).set('ActualResult','');
+            textbox.value = '';
+        });
+    },
+    clearResults: function() {
+        this.setAllSteps('None');
+        this._clearActualResults();
+    },
+    render: function() {
+        this.callParent(arguments);
+        this._setVerdictListeners();
+        this._setActualListeners();
+    }
+});
+Ext.define('Rally.technicalservices.TestCaseChooser',{
+    extend:'Rally.ui.dialog.Dialog',
+    alias:'widget.tstestcasechooser',
+    logger: new Rally.technicalservices.Logger(),
+    config: {
+        title:'Choose Parents of Test Cases',
+        width: 300,
+        height: 300,
+        multiple: 'MULTI'
+    },
+    items: [{
+        xtype: 'panel',
+        border: false,
+        defaults: {
+            padding: 5,
+            margin: 5
+        },
+        items: [        
+            {xtype:'container',itemId:'iteration_selector_box'},
+            {xtype:'container',itemId:'grid_box'}
+        ]
+    }],
+    constructor: function(config){
+        this.mergeConfig(config);
+        this.callParent([this.config]);
+    },
+    initComponent: function() {
+        this.callParent(arguments);
+        this.addEvents(
+            /**
+             * @event selectionMade
+             * Fires when user clicks done after making choices
+             * @param {Rally.technicalservices.TestCaseChooser} this
+             * @param [{model}] array of chosen test cases
+             */
+            'selectionMade',
+            /**
+             * @event cancelChosen
+             * Fires when user clicks the cancel button
+             */
+            'cancelChosen'
+        );
+        this._buildButtons();
+        this._addIterationChooser();
+    },
+    _addIterationChooser: function() {
+        this.down('#iteration_selector_box').add({
+            xtype:'rallyiterationcombobox',
+            fieldLabel:'Iteration',
+            labelWidth: 50,
+            listeners: {
+                scope: this,
+                change: function(ib,new_value){
+                    this._getItemsAndMakeGrid(ib.getQueryFromSelected());
+                }
+            }
+        });
+    },
+    _buildButtons: function() {
+        this.down('panel').addDocked({
+            xtype: 'toolbar',
+            dock: 'bottom',
+            padding: '0 0 10 0',
+            layout: {
+                type: 'hbox',
+                pack: 'center'
+            },
+            ui: 'footer',
+            items: [
+                {
+                    xtype: 'rallybutton',
+                    itemId:'run_button',
+                    text: 'Run',
+                    disabled: true,
+                    scope: this,
+                    userAction: 'clicked done in dialog',
+                    handler: function() {
+                        this.fireEvent('selectionMade', this, this._getTestCaseList());
+                        this.close();
+                    }
+                },
+                {
+                    xtype: 'rallybutton',
+                    text: 'Cancel',
+                    handler: function() {
+                        this.fireEvent('cancelChosen');
+                        this.close()
+                    },
+                    scope: this
+                }
+            ]
+        });
+    },
+    _getTestCaseList: function() {
+        return this.selectionModel.getSelection();
+    },
+    _getItemsAndMakeGrid: function(filter){
+        var me = this;
+                
+        Deft.Promise.all([
+            me._getItems("TestSet",filter), 
+            me._getItems("HierarchicalRequirement",filter), 
+            me._getItems("Defect",filter),
+            me._getItems("TestFolder",filter)
+        ]).then({
+            success: function(records_by_type){
+                var records = [];
+                Ext.Array.each(records_by_type, function(records_for_type){
+                    me.logger.log("Found ",records_for_type.length);
+                    records = Ext.Array.push(records,records_for_type);
+                });
+                me._addGrid(records);
+            }
+        });
+    },
+    _getItems: function(model,filter) {
+        var fetch = ['ObjectID','Name','FormattedID','TestCases'];
+        this.logger.log(model,filter.toString());
+        var deferred = Ext.create('Deft.Deferred');
+        if ( model == "TestFolder" ) {
+            filter = [{property:'ObjectID',operator:'>',value:1}];
+        }
+        Ext.create('Rally.data.wsapi.Store',{
+            model:model,
+            filters: filter,
+            fetch: fetch,
+            autoLoad: true,
+            /*context: {
+                projectScopeDown: false,
+                projectScopeUp: false
+            },*/
+            listeners: {
+                scope: this,
+                load: function(store,items){
+                    var records = [];
+                    Ext.Array.each(items, function(item){
+                        if (item.get('TestCases') && item.get('TestCases').Count > 0 ) {
+                            records.push({
+                                FormattedID:item.get('FormattedID'),
+                                ObjectID:item.get('ObjectID'),
+                                Name:item.get('Name'),
+                                TestCases:item.get('TestCases'),
+                                _type:item.get('_type')
+                            });
+                        }
+                    });
+                    deferred.resolve(records);
+                }
+            }
+        });
+        return deferred.promise;
+    },
+    _addGrid: function(records){
+        this.logger.log("Making a grid with this many records: ", records.length);
+        
+        var store = Ext.create('Rally.data.custom.Store',{ 
+            data: records,
+            limit: 200,
+            pageSize: 200
+        });
+        this.down('#grid_box').removeAll();
+        
+        var mode = this.multiple ? 'MULTI' : 'SINGLE';
+        this.selectionModel = Ext.create('Rally.ui.selection.CheckboxModel', {
+            mode: mode,
+            allowDeselect: true
+        });
+            
+        this.down('#grid_box').add({
+            xtype:'rallygrid',
+            store:store,
+            height: 150,
+            selModel:this.selectionModel,
+            showPagingToolbar: false,
+            columnCfgs:  [
+                {text:'id',dataIndex:'FormattedID'},
+                {text:'Name',dataIndex:'Name', flex: 1}
+            ]
+        });
+        
+        this.down('#run_button').setDisabled(false);
+    }
+    
+});
+Ext.define('CustomApp', {
+    extend: 'Rally.app.App',
+    componentCls: 'app',
+    logger: new Rally.technicalservices.Logger(),
+    case_containers: {},
+    all_cases: {},
+    items: [
+        {xtype:'container',itemId:'test_run', defaults: { padding: 5, margin: 5 }, layout: {type:'hbox'}, items: [
+            {
+                xtype:'rallytextfield',
+                itemId:'build_box',
+                fieldLabel:'Build used for this test run'
+            }
+        ]},
+        {xtype:'container',itemId:'test_checks', defaults: { padding: 5, margin: 5 }, layout: {type:'hbox'}},
+        {xtype:'container',itemId:'test_box'},
+        {xtype:'tsinfolink'}
+    ],
+    launch: function() {
+        this._getCaseVerdicts().then({
+            scope: this,
+            success: function(verdicts) {
+                this.logger.log("Verdicts:",verdicts);
+                this.verdicts = verdicts;
+                this.verdict_store = this._defineStepVerdictStore(this.verdicts);
+                this._addSettingsButton();
+                this._addCheckboxes(verdicts);
+            },
+            failure: function(error) {
+                me.down('#message_box').update(error);
+            }
+        });
+
+    },
+    _addSettingsButton: function() {
+        this.logger.log("_addSettingsButton");
+        this.down('#test_run').add( {
+            xtype:'rallybutton',
+            text: 'Choose Test Parents',
+            disabled: false,
+            scope: this,
+            handler: function() {
+                if ( this.dialog ) { this.dialog.destroy(); }
+                this.dialog = Ext.create('Rally.technicalservices.TestCaseChooser',{
+                    listeners: {
+                        scope: this,
+                        selectionMade: function(dialog, parents) {
+                            this._setAllChecked();
+                            this._makeParentBoxes(parents);
+                        }
+                    }
+                });
+                this.dialog.show();
+            } 
+        });
+    },
+    _getCaseVerdicts: function() {
+        var deferred = Ext.create('Deft.Deferred');
+        this.logger.log("_getCaseVerdicts");
+        
+        Rally.data.ModelFactory.getModel({
+            type: 'TestCase',
+            scope: this,
+            success: function(model) {
+                this.logger.log("got model");
+                 model.getField('LastVerdict').getAllowedValueStore().load({
+                    callback: function(records, operation, success) {
+                        var verdicts = ["None"];
+                        Ext.Array.each(records, function(allowedValue) {
+                            //each record is an instance of the AllowedAttributeValue model 
+                            verdicts.push(allowedValue.get('StringValue'));
+                        });
+                        deferred.resolve(verdicts);
+                    }
+                });
+            }
+        });
+        return deferred.promise;
+    },
+    _addCheckboxes: function(verdicts) {
+        var me = this;
+        var boxes = [];
+        Ext.Array.each(verdicts, function(verdict){
+            boxes.push({
+                boxLabel: verdict, 
+                name: 'rb', 
+                inputValue: verdict, 
+                checked: true
+            });
+        });
+        this.down('#test_checks').add({
+            xtype: 'checkboxgroup',
+            itemId: 'verdict_checks',
+            fieldLabel: 'Show Cases with Last Verdict of',
+            vertical: false,
+            labelWidth: 100,
+            width: 660,
+            items:boxes
+        });
+        this.down('#verdict_checks').on('change',this._revealContainers, this);
+    },
+    _makeParentBoxes: function(parents){
+        this.logger.log("_makeParentBoxes");
+        var me = this;
+        this.down('#test_box').removeAll();
+        this.case_containers = {};
+        this.all_cases = {};
+        
+        Ext.Array.each(parents,function(parent){
+            var container = this.down('#test_box').add({
+                xtype:'container',
+                margin: 10,
+                items: [{xtype:'container',cls:'title',html:parent.get('FormattedID') + ": " + parent.get('Name')}]
+            });
+            Rally.data.ModelFactory.getModel({
+                type:parent.get('_type'),
+                success:function(model){
+                    model.load(parent.get('ObjectID'),{
+                        fetch:['TestCases'],
+                        callback:function(result,operation){
+                            me._getTestCasesForParent(result,container);
+                        }
+                    });
+                }
+            });
+        },this);
+    },
+    _getTestCasesForParent: function(parent,container) {
+        this.logger.log("_getTestCasesForParent");
+        this._mask("Loading test cases...");
+        var me = this;
+        parent.getCollection('TestCases').load({
+            fetch: ['Name','FormattedID','Steps','WorkProduct','LastVerdict'],
+            scope: this,
+            sorters: [{property:'Rank'}],
+            callback: function(cases,operation,success){
+                this.logger.log("  _getTestCasesForParent callback", cases.length);
+                this._getTestStepsForCases(container,cases);
+            }
+        });
+    },
+    _hashToArray: function(hash) {
+        var result = [];
+        Ext.Object.each(hash,function(key,value){
+            result.push(value);
+        });
+        return result;
+    },
+    _mask: function(text) {
+        var me = this;
+        me.setLoading(text);
+//        setTimeout(function(){
+//           me.setLoading(text);
+//        },10);
+    },
+    _unmask: function() {
+        this.setLoading(false);
+    },
+    _getTestStepsForCases: function(container,cases) {
+        this.logger.log("_getTestStepsForCases ",cases.length);
+        this._mask("Loading test steps...");
+        var case_filters = [];
+        var case_hash = {};
+
+        Ext.Array.each(cases,function(tc){ 
+            case_filters.push({property:'TestCase.ObjectID',value:tc.get('ObjectID')});
+            tc.set('_steps',[]);
+            case_hash[tc.get('ObjectID')] = tc;
+        });
+        
+        var filters = Ext.create('Rally.data.wsapi.Filter',case_filters[0]);
+        for ( var i=1;i<case_filters.length;i++){
+            filters = filters.or(Ext.create('Rally.data.wsapi.Filter',case_filters[i]));
+        }
+        
+        Ext.create('Rally.data.wsapi.Store',{
+            model:'TestCaseStep',
+            filters:filters,
+            autoLoad: true,
+            limit: 'Infinity',
+            fetch: ['StepIndex','Input', 'ExpectedResult', 'TestCase', 'ObjectID'],
+            sorters: [{property:'StepIndex'}],
+            listeners: {
+                scope: this,
+                load: function(store,steps) {
+                    this.logger.log("found steps: ", steps.length);
+                    Ext.Array.each(steps,function(step){
+                        var tc_oid = step.get('TestCase').ObjectID
+                        if ( case_hash[tc_oid] ) {
+                            var tc_steps = case_hash[tc_oid].get('_steps');
+                            tc_steps.push(step);
+                            case_hash[tc_oid].set('_steps',tc_steps);
+                        }
+                    });
+                    this._displayTestCasesForContainer(container,this._hashToArray(case_hash));
+                }
+            }
+        });        
+    },
+    _defineStepVerdictStore: function(step_verdicts) {
+        var data = [];
+        Ext.Array.each(step_verdicts,function(verdict){
+            data.push({dataIndex:verdict,text:verdict});
+        });
+        
+        return Ext.create('Rally.data.custom.Store',{
+            data:data
+        });
+    },
+    _displayTestCasesForContainer: function(container,cases) {
+        this.logger.log("_displayTestCasesForContainer",cases.length);
+        this._mask("Creating display...");
+        
+        var me = this;
+        Ext.suspendLayouts();
+        
+        Ext.Array.each(cases, function(tc){
+            me.logger.log("starting ", tc.get('FormattedID'));
+            me.all_cases[tc.get('ObjectID')] = tc;
+            me.case_containers[tc.get('ObjectID')] = container.add({
+                xtype: 'tsteststeptable',
+                margin: 10,
+                test_case: tc,
+                tester: me.getContext().getUser(),
+                step_verdict_store: me.verdict_store,
+                listeners: {
+                    scope: me,
+                    verdictChosen: function(table, test_case, verdict, steps) {
+                        this._makeTestCaseResult(test_case,verdict,steps);
+                        table.clearResults();
+                    },
+                    stepUpdated: function(table,store,step,modified_field_names){
+                        if ( Ext.Array.indexOf(modified_field_names, 'Verdict') > -1 ){
+                            var verdict = step.get('Verdict');
+                            if ( verdict === "None" ) {
+                                step.set('Tester',null);
+                                step.set('TestDate',null);
+                            } else {
+                                step.set('Tester',this.getContext().getUser().UserName);
+                                step.set('TestDate',new Date());
+                            }
+                        }
+                    }
+                }
+            });
+            
+            var selected_verdicts = me.down('#verdict_checks').getValue().rb;            
+            var verdict = tc.get('LastVerdict') || "None";
+        
+            if ( Ext.Array.indexOf(selected_verdicts,verdict) == -1 ) {
+                me.logger.log("Hiding ", tc.get("Name"), " (",tc.get("LastVerdict"),")");
+                me.case_containers[tc.get('ObjectID')].hide();
+            }
+            me.logger.log("done ", tc.get('FormattedID'));
+            me._unmask();
+        });
+        Ext.resumeLayouts(true);
+        me._unmask();
+        
+        me.logger.log("--ready--");
+    },
+    _revealContainers: function(cbg) {
+        var me = this;
+        var selected_verdicts = cbg.getValue().rb;
+        me.logger.log("show ", selected_verdicts );
+        
+        Ext.Object.each( this.case_containers, function(tc_oid,container){
+            var tc = me.all_cases[tc_oid]
+            var verdict = tc.get('LastVerdict') || "None";
+            var container = me.case_containers[tc.get('ObjectID')];
+            if ( Ext.Array.indexOf(selected_verdicts,verdict) == -1 ) {
+                me.logger.log("Hiding ", tc.get("Name"), " (",tc.get("LastVerdict"),")");
+                container.hide();
+            } else {
+                container.show();
+            }
+        });
+    },
+    _makeTestCaseResult: function(test_case,verdict,steps){
+        this.logger.log("_makeTestCaseResult");
+        var me = this;
+        this.logger.log("_makeTestCaseResult");
+        this.getEl().mask("Saving Test Case Result");
+        
+        var build = this.down('#build_box').getValue();
+        if ( !build ) { build = 'unknown'; }
+        
+        var step_array = ["Step|Verdict|Expected|Actual|Tester|Timestamp"];
+        Ext.Array.each(steps, function(step){
+            var display_index = step.get('StepIndex') + 1;
+            
+            var tester = step.get('Tester') || "N/A";
+            var test_date = step.get('TestDate') || "N/A";
+            if ( test_date !== "N/A" ) {
+                test_date = Rally.util.DateTime.toIsoString(test_date)
+            }
+            step_array.push(
+                display_index + "|" +
+                step.get('Verdict') + "|" + 
+                step.get('ExpectedResult') + "|" +
+                step.get('ActualResult') + "|" + 
+                tester + "|" + 
+                test_date
+            );
+        });
+        
+        var notes = step_array.join('<br/>');
+        
+        if ( steps.length === 0 ) { notes = "No test steps were defined"; }
+        
+        Rally.data.ModelFactory.getModel({
+            type: 'TestCaseResult',
+            success: function(model) {
+                me.logger.log("Got Model");
+                var tcr = Ext.create(model,{
+                    Build: build,
+                    Verdict: verdict,
+                    Date: Rally.util.DateTime.toIsoString(new Date()),
+                    TestCase: test_case.get('_ref'),
+                    Tester: me.getContext().getUser()._ref,
+                    Notes: notes
+                });
+                me.logger.log("Saving TCR");
+                tcr.save({
+                    callback: function(result,operation){
+                        me.logger.log("SAVED TCR:",result.get("ObjectID"));
+                        Rally.data.ModelFactory.getModel({
+                            type: 'TestCase',
+                            success: function(tcmodel){
+                                tcmodel.load(test_case.get('ObjectID'),{
+                                    callback:function(tc,operation){
+                                        me.case_containers[test_case.get('ObjectID')].refreshDisplay(tc);
+                                    }
+                                });
+                            },
+                            scope: this
+                        });
+                        if ( verdict === "Fail" ) {
+                            me._askToCreateADefect(result,test_case,notes);
+                        } else {
+                            
+                        }
+                        me.getEl().unmask();
+                    }
+                });
+            }
+        });
+    },
+    _askToCreateADefect:function(tcr,test_case,notes){
+        Ext.create('Rally.ui.dialog.ConfirmDialog', {
+            message: 'Create A Defect?',
+            confirmLabel: 'Yes',
+            cancelLabel: 'No',
+            listeners: {
+                scope: this,
+                confirm: function(){
+                    this._createADefect(tcr,test_case,notes);
+                }
+            }
+        })
+    },
+    _createADefect: function(tcr,test_case,notes){
+        var me = this;
+        var work_product = null;
+        if ( test_case.get('WorkProduct') && test_case.get('WorkProduct')._type == "HierarchicalRequirement" ) {
+            work_product = test_case.get('WorkProduct')._ref;
+        }
+        Rally.data.ModelFactory.getModel({
+            type:'Defect',
+            success: function(model){
+                var defect = Ext.create(model,{
+                    Name: "Problem found while testing " + test_case.get("FormattedID"),
+                    Notes: notes,
+                    TestCase: test_case.get('_ref'),
+                    Requirement: work_product,
+                    TestCaseResult: tcr.get('_ref')
+                });
+                
+                defect.save({
+                    callback: function(result,operation) {
+                        me.logger.log("CREATED DEFECT: ", result.get("FormattedID"), "/", result.get("ObjectID"));
+                        Rally.nav.Manager.edit(result);
+                    }
+                });
+            }
+        });
+    },
+    _setAllChecked: function() {
+        this.down('#verdict_checks').setValue({rb:true});
+    }
+});
+
+            
+               Rally.launchApp('CustomApp', {
+                   name: 'Test Runner'
+               });
+        });
+    </script>
+    
+    <style type="text/css">
+
+.app {
+}
+
+th.ts-grid-header{
+    font-family: ProximaNovaSemiBold, Helvetica, Arial;
+    font-size: 10px ;
+    text-transform: uppercase;
+}
+
+tr.ts-grid-header {
+    border-bottom-color: rgb(136, 136, 136);
+    border-bottom-style: solid;
+    border-bottom-width: 1.1111111640930176px;
+}
+
+tr.ts-grid-row {
+    border-bottom-color: rgb(198, 198, 198);
+    border-bottom-style: solid;
+    border-bottom-width: 1.1111111640930176px;
+}
+
+th.ts-grid-header, td.ts-grid-cell {
+    padding-right:15px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+.title {
+    font-family: ProximaNova, Helvetica, Arial;
+    font-size: 18px;
+    font-style: normal;
+    font-variant: normal;
+    font-weight: normal;
+}
+
+.tsinfolink {
+    position:absolute;
+    right:0px;
+    width:5%;
+}
+    </style>
+
+</head>
+<body></body>
+</html>
